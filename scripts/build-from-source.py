@@ -11,6 +11,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -24,11 +25,17 @@ def command(name: str, *args: str, cwd: Path | None = None, env: dict[str, str] 
         [name, *args],
         cwd=cwd,
         env=env,
-        check=True,
+        check=False,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    if result.returncode:
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode, [name, *args])
     return result.stdout.strip()
 
 
@@ -54,6 +61,8 @@ def main() -> None:
     local_prefix.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
+    env.setdefault("PKG_CONFIG_ALLOW_SYSTEM_CFLAGS", "1")
+    env.setdefault("PKG_CONFIG_ALLOW_SYSTEM_LIBS", "1")
     pkgconfig_dirs = [local_prefix / "lib" / "pkgconfig", local_prefix / "share" / "pkgconfig"]
     existing_pkgconfig = env.get("PKG_CONFIG_PATH", "")
     pkgconfig_values = [str(path) for path in pkgconfig_dirs if path.is_dir()]

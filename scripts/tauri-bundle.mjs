@@ -6,7 +6,7 @@ const candidates = process.platform === "win32" ? ["python", "py"] : ["python3",
 const script = fileURLToPath(new URL("./tauri-bundle.py", import.meta.url));
 
 for (const candidate of candidates) {
-  const result = spawnSync(candidate, [script.pathname], { stdio: "inherit" });
+  const result = spawnSync(candidate, [script], { stdio: "inherit" });
   if (result.error?.code === "ENOENT") continue;
   process.exit(result.status ?? 1);
 }
