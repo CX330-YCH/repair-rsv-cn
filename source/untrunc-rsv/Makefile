@@ -49,6 +49,9 @@ else
 	ifeq ($(_OS), Darwin)
 		LDFLAGS += -liconv
 	endif
+	ifeq ($(_OS), Windows)
+		LDFLAGS += -lshell32
+	endif
 endif
 
 CXXFLAGS += -std=c++17 -D_FILE_OFFSET_BITS=64
