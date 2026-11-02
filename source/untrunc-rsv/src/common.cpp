@@ -5,6 +5,12 @@
 #include <sstream>
 #include <cmath>
 #include <unistd.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <codecvt>
+#endif
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
@@ -471,9 +477,6 @@ void parseMaxPartsize(string& s) {
 }
 
 #ifdef _WIN32
-#include <windows.h>
-#include <codecvt>
-
 string to_utf8(const wchar_t* utf16) {
 	wstring_convert<codecvt_utf8_utf16<wchar_t>, wchar_t> convert;
 	return convert.to_bytes(utf16);
