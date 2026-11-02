@@ -19,10 +19,6 @@ jobs:
             os: macos-14
             bundles: dmg
             artifact: repair-rsv-macos-arm64
-          - name: macOS Intel
-            os: macos-13
-            bundles: dmg
-            artifact: repair-rsv-macos-x64
           - name: Windows x64
             os: windows-2022
             bundles: nsis,msi
