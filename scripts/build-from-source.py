@@ -90,8 +90,9 @@ def main() -> None:
     cflags = command(pkg_config, "--cflags", "libavformat", "libavcodec", "libavutil", env=env)
     libs = command(pkg_config, "--libs", "libavformat", "libavcodec", "libavutil", env=env)
     jobs = os.environ.get("MAKE_JOBS", str(max(1, os.cpu_count() or 1)))
-    output_name = "untrunc-rsv.exe" if os.name == "nt" else "untrunc-rsv"
-    source_name = "untrunc.exe" if os.name == "nt" else "untrunc"
+    is_windows = os.name == "nt" or system.startswith("win") or bool(os.environ.get("MSYSTEM"))
+    output_name = "untrunc-rsv.exe" if is_windows else "untrunc-rsv"
+    source_name = "untrunc.exe" if is_windows else "untrunc"
 
     command(make, "clean", cwd=SOURCE, env=env)
     command(
@@ -109,7 +110,7 @@ def main() -> None:
     BIN.mkdir(parents=True, exist_ok=True)
     destination = BIN / output_name
     shutil.copy2(built, destination)
-    if os.name != "nt":
+    if not is_windows:
         destination.chmod(0o755)
     print(f"Updated {destination}")
 
