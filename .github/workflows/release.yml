@@ -83,6 +83,7 @@ jobs:
             mingw-w64-x86_64-ffmpeg
             mingw-w64-x86_64-pkgconf
             make
+            diffutils
             python
 
       - name: Install JavaScript dependencies
