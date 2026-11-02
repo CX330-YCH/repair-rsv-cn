@@ -1,0 +1,135 @@
+name: Build release artifacts
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-14
+            bundles: dmg
+            artifact: repair-rsv-macos-arm64
+          - name: macOS Intel
+            os: macos-13
+            bundles: dmg
+            artifact: repair-rsv-macos-x64
+          - name: Windows x64
+            os: windows-2022
+            bundles: nsis,msi
+            artifact: repair-rsv-windows-x64
+          - name: Linux x64
+            os: ubuntu-24.04
+            bundles: deb,appimage
+            artifact: repair-rsv-linux-x64
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12.8
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.1
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install pkg-config ffmpeg
+          echo "REPAIR_RSV_FFMPEG_VERSION=$(ffmpeg -version | awk 'NR==1 {print $3}')" >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg pkg-config libavformat-dev libavcodec-dev libavutil-dev \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          echo "REPAIR_RSV_FFMPEG_VERSION=$(ffmpeg -version | awk 'NR==1 {print $3}')" >> "$GITHUB_ENV"
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-pkgconf
+            make
+            python
+
+      - name: Install JavaScript dependencies
+        run: npm ci --prefix app
+
+      - name: Build helper on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          python scripts/build-from-source.py
+          mkdir -p lib
+          cp /mingw64/bin/*.dll bin/ || true
+
+      - name: Build desktop bundle
+        shell: bash
+        env:
+          REPAIR_RSV_SKIP_HELPER_BUILD: ${{ runner.os == 'Windows' && '1' || '0' }}
+        run: npm run bundle --prefix app
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p "release-artifacts/${{ matrix.artifact }}"
+          find app/src-tauri/target/release/bundle -type f \
+            \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' \) \
+            -exec cp {} "release-artifacts/${{ matrix.artifact }}/" \;
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifacts/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    name: Upload release assets
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Upload assets to the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG_NAME" release-artifacts/**/* --repo "$GITHUB_REPOSITORY" --clobber

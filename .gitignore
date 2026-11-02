@@ -17,6 +17,8 @@ app/dist/
 app/src-tauri/target
 app/src-tauri/target/
 app/src-tauri/gen/
+.tooling/*
+!.tooling/README.md
 lib/
 assets/
 outputs/

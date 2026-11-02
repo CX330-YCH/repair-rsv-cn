@@ -1,16 +1,15 @@
 use serde::Serialize;
 mod media;
-#[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
 use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
     thread,
+    time::Duration,
 };
 use tauri::{
     menu::{AboutMetadataBuilder, Menu, MenuBuilder, SubmenuBuilder},
@@ -19,7 +18,7 @@ use tauri::{
 };
 
 struct RepairState {
-    child_pid: Mutex<Option<u32>>,
+    child: Mutex<Option<Child>>,
     cancelled: AtomicBool,
 }
 
@@ -39,10 +38,7 @@ fn start_repair(
     donor_path: String,
     broken_path: String,
 ) -> Result<(), String> {
-    let mut child_guard = state
-        .child_pid
-        .lock()
-        .map_err(|_| "Repair state is locked")?;
+    let mut child_guard = state.child.lock().map_err(|_| "Repair state is locked")?;
     if child_guard.is_some() {
         return Err("A repair is already running.".to_string());
     }
@@ -76,10 +72,8 @@ fn start_repair(
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let child_pid = child.id();
-
     state.cancelled.store(false, Ordering::SeqCst);
-    *child_guard = Some(child_pid);
+    *child_guard = Some(child);
     drop(child_guard);
 
     emit_event(
@@ -103,14 +97,36 @@ fn start_repair(
     let app_for_wait = app.clone();
     thread::spawn(move || {
         let state_for_wait = app_for_wait.state::<RepairState>();
-        let exit_status = child.wait();
+        let exit_status = loop {
+            let mut child_guard = match state_for_wait.child.lock() {
+                Ok(guard) => guard,
+                Err(_) => break Err(std::io::Error::other("Repair state is locked")),
+            };
+
+            let Some(child) = child_guard.as_mut() else {
+                break Err(std::io::Error::other(
+                    "Repair process is no longer available",
+                ));
+            };
+
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    child_guard.take();
+                    break Ok(status);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    child_guard.take();
+                    break Err(error);
+                }
+            }
+            drop(child_guard);
+            thread::sleep(Duration::from_millis(50));
+        };
+
         // Deliver buffered helper output before the final UI state.
         for reader in [stdout_reader, stderr_reader].into_iter().flatten() {
             let _ = reader.join();
-        }
-
-        if let Ok(mut guard) = state_for_wait.child_pid.lock() {
-            *guard = None;
         }
 
         if state_for_wait.cancelled.load(Ordering::SeqCst) {
@@ -173,30 +189,11 @@ fn start_repair(
 fn cancel_repair(state: tauri::State<'_, RepairState>) -> Result<(), String> {
     state.cancelled.store(true, Ordering::SeqCst);
 
-    let pid = {
-        let guard = state
-            .child_pid
-            .lock()
-            .map_err(|_| "Repair state is locked")?;
-        *guard
-    };
-
-    match pid {
-        Some(pid) => {
-            let status = Command::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .status()
-                .map_err(|error| format!("Failed to cancel repair: {error}"))?;
-
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Failed to cancel repair: kill exited with {status}"
-                ))
-            }
-        }
+    let mut guard = state.child.lock().map_err(|_| "Repair state is locked")?;
+    match guard.as_mut() {
+        Some(child) => child
+            .kill()
+            .map_err(|error| format!("Failed to cancel repair: {error}")),
         None => Err("No repair is running.".to_string()),
     }
 }
@@ -208,11 +205,23 @@ fn reveal_output(output_path: String) -> Result<(), String> {
         return Err("Output file does not exist yet.".to_string());
     }
 
-    Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .status()
-        .map_err(|error| format!("Failed to reveal output: {error}"))?;
+    let status = if cfg!(target_os = "macos") {
+        Command::new("open").arg("-R").arg(&path).status()
+    } else if cfg!(target_os = "windows") {
+        Command::new("explorer.exe")
+            .arg(format!("/select,{}", path.display()))
+            .status()
+    } else {
+        let parent = path
+            .parent()
+            .ok_or_else(|| "Output file has no parent directory.".to_string())?;
+        Command::new("xdg-open").arg(parent).status()
+    }
+    .map_err(|error| format!("Failed to reveal output: {error}"))?;
+
+    if !status.success() {
+        return Err(format!("File manager exited with {status}"));
+    }
 
     Ok(())
 }
@@ -221,7 +230,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(RepairState {
-            child_pid: Mutex::new(None),
+            child: Mutex::new(None),
             cancelled: AtomicBool::new(false),
         })
         .setup(|app| {
@@ -263,12 +272,6 @@ fn build_app_menu(app: &AppHandle, language: &str) -> tauri::Result<Menu<Wry>> {
 
     let app_menu = SubmenuBuilder::new(app, "Repair RSV")
         .about_with_text(tr("About Repair RSV", "关于 Repair RSV"), Some(about))
-        .separator()
-        .services_with_text(tr("Services", "服务"))
-        .separator()
-        .hide_with_text(tr("Hide Repair RSV", "隐藏 Repair RSV"))
-        .hide_others_with_text(tr("Hide Others", "隐藏其他"))
-        .show_all_with_text(tr("Show All", "全部显示"))
         .separator()
         .quit_with_text(tr("Quit Repair RSV", "退出 Repair RSV"))
         .build()?;
@@ -371,12 +374,11 @@ fn emit_event(
 }
 
 fn resolve_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
-    if let Ok(resource_path) = app
-        .path()
-        .resolve("bin/untrunc-rsv", BaseDirectory::Resource)
-    {
-        if resource_path.is_file() {
-            return Ok(resource_path);
+    for relative in ["bin/untrunc-rsv", "bin/untrunc-rsv.exe"] {
+        if let Ok(resource_path) = app.path().resolve(relative, BaseDirectory::Resource) {
+            if resource_path.is_file() {
+                return Ok(resource_path);
+            }
         }
     }
 
@@ -385,13 +387,14 @@ fn resolve_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
         .parent()
         .and_then(Path::parent)
         .ok_or_else(|| "Cannot locate repository root.".to_string())?;
-    let dev_path = repo_root.join("bin/untrunc-rsv");
-
-    if dev_path.is_file() {
-        Ok(dev_path)
-    } else {
-        Err("Cannot find bundled untrunc-rsv binary.".to_string())
+    for relative in ["bin/untrunc-rsv", "bin/untrunc-rsv.exe"] {
+        let dev_path = repo_root.join(relative);
+        if dev_path.is_file() {
+            return Ok(dev_path);
+        }
     }
+
+    Err("Cannot find bundled untrunc-rsv binary.".to_string())
 }
 
 fn expected_output_path(broken_path: &Path) -> PathBuf {
@@ -401,11 +404,6 @@ fn expected_output_path(broken_path: &Path) -> PathBuf {
 fn describe_exit_status(status: std::process::ExitStatus) -> String {
     if let Some(code) = status.code() {
         return format!("exit code {code}");
-    }
-
-    #[cfg(unix)]
-    if let Some(signal) = status.signal() {
-        return format!("terminated by signal {signal}");
     }
 
     "terminated without an exit code".to_string()

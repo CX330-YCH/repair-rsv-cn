@@ -72,12 +72,14 @@
 
 需要 macOS、Xcode Command Line Tools、Homebrew、Node.js、Rust stable 和 Python 3。首次构建需要联网下载 npm 与 Cargo 依赖。
 
+跨平台构建使用仓库内的 `.tooling` 环境，不修改系统级 Cargo、Rustup 或 npm 配置。详细的 Windows、Linux 和 macOS 构建说明见 [跨平台本地构建](docs/BUILDING-PLATFORMS.md)。
+
 ```zsh
 xcode-select --install
-brew install ffmpeg pkgconf node rust python
-
 git clone https://github.com/CX330-YCH/repair-rsv-cn.git
 cd repair-rsv-cn
+brew install ffmpeg pkgconf node python
+source scripts/local-env.sh
 npm --prefix app ci
 
 # 编译恢复引擎

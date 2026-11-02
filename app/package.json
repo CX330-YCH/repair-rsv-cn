@@ -8,18 +8,18 @@
     "web:build": "tsc && vite build",
     "dev": "tauri dev",
     "build": "npm run web:build",
-    "check:tauri": "../scripts/with-appledouble-cleaner.sh cargo check --manifest-path src-tauri/Cargo.toml",
-    "prebundle": "../scripts/clean-appledouble.sh",
-    "bundle": "../scripts/tauri-bundle.sh",
+    "check:tauri": "node ../scripts/tauri-check.mjs",
+    "prebundle": "node ../scripts/clean-appledouble.mjs",
+    "bundle": "node ../scripts/tauri-bundle.mjs",
     "notarize": "../scripts/notarize-dmg.sh"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.2.0",
-    "@tauri-apps/plugin-dialog": "^2.2.0"
+    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/plugin-dialog": "2.7.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.2.0",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "@tauri-apps/cli": "2.10.1",
+    "typescript": "5.9.3",
+    "vite": "6.4.2"
   }
 }
