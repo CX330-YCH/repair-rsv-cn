@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,11 +28,13 @@ def main() -> None:
     env.setdefault("NPM_CONFIG_CACHE", str(TOOLING / "npm-cache"))
     env.setdefault("REPAIR_RSV_DEPS_PREFIX", str(TOOLING / "deps" / f"{system}-{platform.machine().lower()}"))
     env["PATH"] = os.pathsep.join([str(TOOLING / "bin"), str(Path(env["CARGO_HOME"]) / "bin"), env.get("PATH", "")])
+    npm_name = "npm.cmd" if os.name == "nt" else "npm"
+    npm = shutil.which(npm_name) or npm_name
 
     (ROOT / "lib").mkdir(parents=True, exist_ok=True)
     if env.get("REPAIR_RSV_SKIP_HELPER_BUILD") != "1":
         run(sys.executable, str(ROOT / "scripts" / "build-from-source.py"), env=env)
-    run("npm", "--prefix", str(APP), "run", "web:build", env=env)
+    run(npm, "--prefix", str(APP), "run", "web:build", env=env)
 
     if system == "darwin":
         run("zsh", str(ROOT / "scripts" / "bundle-ffmpeg-dylibs.sh"), env=env)
@@ -42,7 +45,7 @@ def main() -> None:
     else:
         bundles = "deb,appimage"
 
-    run("npm", "--prefix", str(APP), "exec", "--", "tauri", "build", "--bundles", bundles, env=env)
+    run(npm, "--prefix", str(APP), "exec", "--", "tauri", "build", "--bundles", bundles, env=env)
 
 
 if __name__ == "__main__":
