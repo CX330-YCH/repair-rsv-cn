@@ -36,6 +36,9 @@ ifeq ($(FF_VER), shared)
 	FFMPEG_LIBS ?= -lavformat -lavcodec -lavutil
 	CXXFLAGS += $(FFMPEG_CFLAGS)
 	LDFLAGS += $(FFMPEG_LIBS)
+	ifeq ($(_OS), Windows)
+		LDFLAGS += -lshell32
+	endif
 else
 	CXXFLAGS += -isystem./$(FFDIR)
 	LDFLAGS += -L$(FFDIR)/libavformat -lavformat
@@ -48,9 +51,6 @@ else
 
 	ifeq ($(_OS), Darwin)
 		LDFLAGS += -liconv
-	endif
-	ifeq ($(_OS), Windows)
-		LDFLAGS += -lshell32
 	endif
 endif
 
