@@ -1,5 +1,8 @@
 use serde::Serialize;
 mod media;
+mod process;
+#[cfg(any(target_os = "windows", test))]
+mod windows_runtime;
 use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -13,7 +16,6 @@ use std::{
 };
 use tauri::{
     menu::{AboutMetadataBuilder, Menu, MenuBuilder, SubmenuBuilder},
-    path::BaseDirectory,
     AppHandle, Emitter, Manager, Wry,
 };
 
@@ -59,7 +61,7 @@ fn start_repair(
 
     let tool_display = tool.to_string_lossy().to_string();
 
-    let mut child = Command::new(&tool)
+    let mut child = process::background_command(&tool)
         .arg("-rsv")
         .arg("-dst")
         .arg(&output_path)
@@ -234,6 +236,8 @@ pub fn run() {
             cancelled: AtomicBool::new(false),
         })
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            resolve_tool_path(app.handle()).map_err(std::io::Error::other)?;
             app.set_menu(build_app_menu(app.handle(), "en")?)?;
             Ok(())
         })
@@ -374,8 +378,25 @@ fn emit_event(
 }
 
 fn resolve_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
-    for relative in ["bin/untrunc-rsv", "bin/untrunc-rsv.exe"] {
-        if let Ok(resource_path) = app.path().resolve(relative, BaseDirectory::Resource) {
+    #[cfg(target_os = "windows")]
+    {
+        let cache = app
+            .path()
+            .app_cache_dir()
+            .map_err(|error| error.to_string())?;
+        windows_runtime::helper_path(&cache)
+    }
+    #[cfg(not(target_os = "windows"))]
+    resolve_resource_tool_path(app)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_resource_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
+    for relative in ["bin/untrunc-rsv"] {
+        if let Ok(resource_path) = app
+            .path()
+            .resolve(relative, tauri::path::BaseDirectory::Resource)
+        {
             if resource_path.is_file() {
                 return Ok(resource_path);
             }
@@ -387,7 +408,7 @@ fn resolve_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
         .parent()
         .and_then(Path::parent)
         .ok_or_else(|| "Cannot locate repository root.".to_string())?;
-    for relative in ["bin/untrunc-rsv", "bin/untrunc-rsv.exe"] {
+    for relative in ["bin/untrunc-rsv"] {
         let dev_path = repo_root.join(relative);
         if dev_path.is_file() {
             return Ok(dev_path);

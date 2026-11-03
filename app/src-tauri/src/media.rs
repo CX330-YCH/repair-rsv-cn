@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 use tauri::AppHandle;
 
 #[tauri::command]
@@ -9,7 +9,7 @@ pub async fn probe_media(app: AppHandle, file_path: String) -> Result<serde_json
         return Err("Media file does not exist.".to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let output = Command::new(tool)
+        let output = crate::process::background_command(tool)
             .arg("--probe")
             .arg(path)
             .output()

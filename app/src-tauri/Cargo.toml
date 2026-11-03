@@ -1,6 +1,6 @@
 [package]
 name = "repair-rsv"
-version = "0.1.2"
+version = "0.1.5"
 description = "One-click Sony RSV repair app"
 authors = ["Repair RSV"]
 edition = "2021"
@@ -11,9 +11,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "=2.5.6", features = [] }
+flate2 = "=1.1.9"
+sha2 = "=0.10.9"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+flate2 = "=1.1.9"
+sha2 = "=0.10.9"
 tauri = { version = "=2.10.3", features = [] }
 tauri-plugin-dialog = "=2.7.0"

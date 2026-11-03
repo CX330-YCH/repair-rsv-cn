@@ -14,6 +14,8 @@
 
 在 [Releases](https://github.com/CX330-YCH/repair-rsv-cn/releases) 下载最新安装包。当前提供 **macOS Apple Silicon** 的 DMG 和 ZIP；安装包使用本地 ad-hoc 签名，尚未进行 Apple 公证。
 
+**Windows x64：** 从 v0.1.5 起提供单文件 `Repair-RSV-<版本>-Windows-x64.exe`，直接双击运行，无需安装或下载额外 DLL。首次启动自动释放内置恢复引擎到用户缓存，不弹终端窗口；界面使用系统 Microsoft Edge WebView2 Runtime。不要下载旧版 `-setup.exe` 来代替单文件版。Linux 提供 DEB / AppImage，Intel Mac 构建暂时停用。
+
 1. 打开 Repair RSV，选择或拖入损坏的 `.RSV` 文件。
 2. 选择同一相机、同一录制模式的正常视频作为参照，尤其注意编码、分辨率、帧率和音频设置。
 3. 点击「开始修复」。完成后点击「显示输出文件」。

@@ -11,6 +11,7 @@ const env = {
   ...process.env,
   CARGO_HOME: cargoHome,
   RUSTUP_HOME: process.env.RUSTUP_HOME ?? resolve(tooling, "rustup"),
+  CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? resolve(tooling, "tauri-target"),
   PATH: [resolve(tooling, "bin"), resolve(cargoHome, "bin"), process.env.PATH ?? ""].join(process.platform === "win32" ? ";" : ":"),
 };
 
