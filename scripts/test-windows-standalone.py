@@ -31,8 +31,9 @@ def main():
         shutil.copy2(executable, standalone)
         assert len(list(isolated.iterdir())) == 1, "Only the EXE should be distributed"
         env = os.environ.copy()
+        system_root = Path(os.environ["SYSTEMROOT"])
         # No MSYS2 DLLs or repository paths available to accidentally mask omissions.
-        env["PATH"] = os.pathsep.join([str(Path(env["SystemRoot"]) / "System32"), env["SystemRoot"]])
+        env["PATH"] = os.pathsep.join([str(system_root / "System32"), str(system_root)])
         engine_cache = Path(env["LOCALAPPDATA"]) / "com.repairrsv.desktop" / "engine"
         env.pop("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", None)
         app = subprocess.Popen([str(standalone)], cwd=isolated, env=env)
@@ -63,7 +64,7 @@ def main():
             print("Windows GUI EXE and embedded engine passed isolated startup/probe checks")
         finally:
             # Stop this app's WebView children before removing the temporary cache.
-            subprocess.run([str(Path(env["SystemRoot"]) / "System32/taskkill.exe"), "/PID", str(app.pid), "/T", "/F"], capture_output=True)
+            subprocess.run([str(system_root / "System32/taskkill.exe"), "/PID", str(app.pid), "/T", "/F"], capture_output=True)
             app.wait(timeout=30)
 
 
