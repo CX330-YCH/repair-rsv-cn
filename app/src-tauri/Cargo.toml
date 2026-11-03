@@ -1,6 +1,6 @@
 [package]
 name = "repair-rsv"
-version = "0.1.6"
+version = "0.1.7"
 description = "One-click Sony RSV repair app"
 authors = ["Repair RSV"]
 edition = "2021"

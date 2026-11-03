@@ -87,6 +87,13 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci --prefix app
 
+      - name: Test startup states
+        run: npm run test:startup --prefix app
+
+      - name: Test Windows DLL collection
+        if: runner.os == 'Windows'
+        run: python tests/windows_dll_bundle_test.py
+
       - name: Build helper on Windows
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -94,7 +101,7 @@ jobs:
           export PATH="/mingw64/bin:$PATH"
           python scripts/build-from-source.py
           mkdir -p lib
-          cp /mingw64/bin/*.dll bin/
+          python scripts/bundle-windows-dlls.py --dll-dir "$(cygpath -m /mingw64/bin)"
 
       - name: Build desktop bundle
         shell: bash

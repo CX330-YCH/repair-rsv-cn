@@ -36,6 +36,8 @@ npm --prefix app run bundle
 
 Windows 构建前，将 `untrunc-rsv.exe` 和所有 FFmpeg/MinGW 运行时 DLL 放入仓库 `bin/`。Windows 的 `build.rs` 会把引擎、DLL 和许可证压缩嵌入主程序，不包含仓库中的 macOS helper。`tauri build --no-bundle` 生成 GUI 子系统程序，再复制到 `bundle/portable/Repair-RSV-<版本>-Windows-x64.exe`，不生成 MSI 或安装向导。
 
-发布时只需下载并双击这一个 EXE，不需要旁置文件；首次运行会将内置引擎释放到 Windows 用户缓存 `com.repairrsv.desktop/engine/<内容哈希>/`，后续启动校验并复用，缓存损坏时自动重新释放。主程序、文件信息读取和修复子进程不会创建控制台窗口。界面仍使用 Windows 的 Microsoft Edge WebView2 Runtime，未安装该系统组件的机器需要先补装它。
+发布时只需下载并双击这一个 EXE，不需要旁置文件。启动后先显示整页“正在准备引擎…”画面，后台准备完成后再进入主页面；失败可重试。首次运行将内置引擎释放到 Windows 用户缓存 `com.repairrsv.desktop/engine/<内容哈希>/`，边解压边完整校验。后续启动只比较准备记录与文件大小、修改时间；发生变化或准备记录丢失时才重新完整校验或恢复。主程序、文件信息读取和修复子进程不会创建控制台窗口。界面仍使用 Windows 的 Microsoft Edge WebView2 Runtime，未安装该系统组件的机器需要先补装它。
+
+Windows CI 通过 `scripts/bundle-windows-dlls.py` 递归检查 PE 导入表，只收集引擎实际依赖的非系统 DLL，缺失依赖直接报告错误。可在 MSYS2 下用 `python scripts/bundle-windows-dlls.py --dll-dir "$(cygpath -m /mingw64/bin)"` 更新 `bin/`，然后构建单文件应用。
 
 GitHub Actions 只监听 `release: published`，构建 Apple Silicon、Windows x64 和 Linux x64；Intel Mac 暂停构建。Windows 产物上传前，会复制单个 EXE 到包含中文和空格的隔离目录，移除构建工具 DLL 搜索路径，检查 GUI PE 子系统、应用启动和释放后的引擎 `--probe`；如果任一检查失败，不上传该发布的附件。

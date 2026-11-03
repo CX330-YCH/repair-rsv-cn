@@ -1,11 +1,12 @@
 {
   "name": "repair-rsv-app",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "scripts": {
     "web:dev": "vite --host 127.0.0.1",
     "web:build": "tsc && vite build",
+    "test:startup": "node --test ../tests/startup_ui_test.mjs",
     "dev": "tauri dev",
     "build": "npm run web:build",
     "check:tauri": "node ../scripts/tauri-check.mjs",

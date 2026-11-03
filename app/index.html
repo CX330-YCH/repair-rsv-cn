@@ -6,7 +6,14 @@
     <title>Repair RSV</title>
   </head>
   <body>
-    <main class="shell">
+    <section id="enginePanel" class="engine-screen" role="status" aria-live="polite" aria-busy="true">
+      <div class="engine-content">
+        <span id="engineSpinner" class="engine-spinner" aria-hidden="true"></span>
+        <p id="engineMessage">正在准备引擎…</p>
+        <button id="engineRetry" class="secondary" type="button" hidden data-i18n="engineRetry">重试</button>
+      </div>
+    </section>
+    <main id="mainPage" class="shell" hidden>
       <section class="hero">
         <div>
           <p class="eyebrow" data-i18n="eyebrow">SONY RSV 视频修复</p>
@@ -16,13 +23,13 @@
           <label class="language-control"><span data-i18n="language">语言</span>
             <select id="languageSelect" aria-label="语言"><option value="zh-CN">简体中文</option><option value="en">English</option></select>
           </label>
-          <div id="statePill" class="state-pill">准备就绪</div>
+          <div id="statePill" class="state-pill">正在准备</div>
         </div>
       </section>
 
       <section id="inputGrid" class="drop-grid" aria-label="修复文件选择">
         <section class="input-card">
-        <button id="brokenDrop" class="drop-zone" type="button">
+        <button id="brokenDrop" class="drop-zone" type="button" disabled>
           <span class="label" data-i18n="broken">待修复 RSV</span>
           <span id="brokenIcon" class="drop-icon" aria-hidden="true">
             <svg class="icon icon-plus" viewBox="0 0 64 64" focusable="false">
@@ -37,7 +44,7 @@
           <div id="brokenInfo" class="media-info" aria-live="polite"></div>
         </section>
         <section class="input-card">
-        <button id="donorDrop" class="drop-zone" type="button">
+        <button id="donorDrop" class="drop-zone" type="button" disabled>
           <span class="label" data-i18n="donor">参照视频</span>
           <span id="donorIcon" class="drop-icon" aria-hidden="true">
             <svg class="icon icon-plus" viewBox="0 0 64 64" focusable="false">

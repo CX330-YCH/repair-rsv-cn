@@ -236,8 +236,6 @@ pub fn run() {
             cancelled: AtomicBool::new(false),
         })
         .setup(|app| {
-            #[cfg(target_os = "windows")]
-            resolve_tool_path(app.handle()).map_err(std::io::Error::other)?;
             app.set_menu(build_app_menu(app.handle(), "en")?)?;
             Ok(())
         })
@@ -245,11 +243,30 @@ pub fn run() {
             start_repair,
             cancel_repair,
             reveal_output,
+            prepare_engine,
             media::probe_media,
             set_language
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Repair RSV");
+}
+
+#[tauri::command]
+async fn prepare_engine(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        {
+            let cache = app
+                .path()
+                .app_cache_dir()
+                .map_err(|error| error.to_string())?;
+            windows_runtime::prepare_helper_path(&cache).map(|_| ())
+        }
+        #[cfg(not(target_os = "windows"))]
+        resolve_tool_path(&app).map(|_| ())
+    })
+    .await
+    .map_err(|error| format!("Engine preparation failed: {error}"))?
 }
 
 #[tauri::command]
@@ -380,11 +397,8 @@ fn emit_event(
 fn resolve_tool_path(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
-        let cache = app
-            .path()
-            .app_cache_dir()
-            .map_err(|error| error.to_string())?;
-        windows_runtime::helper_path(&cache)
+        let _ = app;
+        windows_runtime::ready_helper_path()
     }
     #[cfg(not(target_os = "windows"))]
     resolve_resource_tool_path(app)

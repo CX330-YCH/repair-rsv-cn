@@ -18,16 +18,91 @@ struct RuntimeFile {
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn helper_path(cache: &Path) -> Result<PathBuf, String> {
-    use std::sync::OnceLock;
-    static HELPER: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+static HELPER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+#[cfg(target_os = "windows")]
+static PREPARING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(target_os = "windows")]
+pub(crate) fn ready_helper_path() -> Result<PathBuf, String> {
     HELPER
-        .get_or_init(|| {
-            prepare_runtime(cache, embedded::ID, embedded::FILES, embedded::ARCHIVE)
-                .map(|directory| directory.join("untrunc-rsv.exe"))
-                .map_err(|error| format!("Could not prepare the embedded repair engine: {error}"))
+        .get()
+        .cloned()
+        .ok_or_else(|| "The repair engine is not ready yet.".to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn prepare_helper_path(cache: &Path) -> Result<PathBuf, String> {
+    let _guard = PREPARING
+        .lock()
+        .map_err(|_| "Engine preparation is locked")?;
+    if let Some(helper) = HELPER.get() {
+        return Ok(helper.clone());
+    }
+    let helper = prepare_runtime(cache, embedded::ID, embedded::FILES, embedded::ARCHIVE)
+        .map(|directory| directory.join("untrunc-rsv.exe"))
+        .map_err(|error| format!("Could not prepare the embedded repair engine: {error}"))?;
+    let _ = HELPER.set(helper.clone());
+    Ok(helper)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct FileStamp {
+    name: String,
+    size: u64,
+    modified_seconds: u64,
+    modified_nanos: u32,
+}
+
+fn file_stamps(directory: &Path, files: &[RuntimeFile]) -> io::Result<Vec<FileStamp>> {
+    files
+        .iter()
+        .map(|entry| {
+            let info = fs::symlink_metadata(directory.join(entry.name))?;
+            if !info.is_file() || info.len() != entry.size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Engine file changed",
+                ));
+            }
+            let modified = info
+                .modified()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(io::Error::other)?;
+            Ok(FileStamp {
+                name: entry.name.to_string(),
+                size: entry.size,
+                modified_seconds: modified.as_secs(),
+                modified_nanos: modified.subsec_nanos(),
+            })
         })
-        .clone()
+        .collect()
+}
+
+fn fast_valid_runtime(directory: &Path, files: &[RuntimeFile]) -> bool {
+    let Ok(marker) = fs::read(directory.join(".ready.json")) else {
+        return false;
+    };
+    let Ok(saved) = serde_json::from_slice::<Vec<FileStamp>>(&marker) else {
+        return false;
+    };
+    file_stamps(directory, files).is_ok_and(|current| current == saved)
+}
+
+fn mark_ready(directory: &Path, files: &[RuntimeFile]) -> io::Result<()> {
+    let stamps = file_stamps(directory, files)?;
+    fs::write(directory.join(".ready.json"), serde_json::to_vec(&stamps)?)
+}
+
+fn reuse_runtime(directory: &Path, files: &[RuntimeFile]) -> io::Result<bool> {
+    if fast_valid_runtime(directory, files) {
+        return Ok(true);
+    }
+    // Re-hash only when the small metadata record is missing or changed.
+    if valid_runtime(directory, files) {
+        mark_ready(directory, files)?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn valid_runtime(directory: &Path, files: &[RuntimeFile]) -> bool {
@@ -58,7 +133,7 @@ fn prepare_runtime(
 ) -> io::Result<PathBuf> {
     let parent = cache.join("engine");
     let directory = parent.join(id);
-    if valid_runtime(&directory, files) {
+    if reuse_runtime(&directory, files)? {
         return Ok(directory);
     }
     fs::create_dir_all(&parent)?;
@@ -68,7 +143,19 @@ fn prepare_runtime(
         let mut decoder = GzDecoder::new(archive);
         for entry in files {
             let mut output = File::create(staging.join(entry.name))?;
-            let copied = io::copy(&mut decoder.by_ref().take(entry.size), &mut output)?;
+            let mut digest = Sha256::new();
+            let mut copied = 0;
+            let mut limited = decoder.by_ref().take(entry.size);
+            let mut buffer = [0u8; 65536];
+            loop {
+                let count = limited.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                output.write_all(&buffer[..count])?;
+                digest.update(&buffer[..count]);
+                copied += count as u64;
+            }
             output.flush()?;
             if copied != entry.size {
                 return Err(io::Error::new(
@@ -76,24 +163,31 @@ fn prepare_runtime(
                     "Incomplete embedded engine",
                 ));
             }
+            if <[u8; 32]>::from(digest.finalize()) != entry.digest {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Embedded engine checksum mismatch",
+                ));
+            }
         }
         // Read to EOF to verify the gzip trailer/checksum as well.
         let mut remainder = [0u8; 1];
-        if decoder.read(&mut remainder)? != 0 || !valid_runtime(&staging, files) {
+        if decoder.read(&mut remainder)? != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Embedded engine checksum mismatch",
             ));
         }
+        mark_ready(&staging, files)?;
         if directory.exists() {
-            if valid_runtime(&directory, files) {
+            if reuse_runtime(&directory, files)? {
                 return Ok(directory.clone()); // Another app instance finished extracting it.
             }
             fs::remove_dir_all(&directory)?;
         }
         match fs::rename(&staging, &directory) {
             Ok(()) => Ok(directory.clone()),
-            Err(_) if valid_runtime(&directory, files) => Ok(directory.clone()),
+            Err(_) if fast_valid_runtime(&directory, files) => Ok(directory.clone()),
             Err(error) => Err(error),
         }
     })();
@@ -135,6 +229,7 @@ mod tests {
         encoder.write_all(b"helperlibrary").unwrap();
         let archive = encoder.finish().unwrap();
         let directory = prepare_runtime(&root, "fixture", &files, &archive).unwrap();
+        assert!(fast_valid_runtime(&directory, &files));
         assert_eq!(
             fs::read(directory.join("untrunc-rsv.exe")).unwrap(),
             b"helper"
@@ -145,8 +240,21 @@ mod tests {
             directory
         );
         fs::write(directory.join("avcodec.dll"), b"damaged").unwrap();
+        File::options()
+            .write(true)
+            .open(directory.join("avcodec.dll"))
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new().set_modified(UNIX_EPOCH + std::time::Duration::from_secs(1)),
+            )
+            .unwrap();
+        assert!(!fast_valid_runtime(&directory, &files));
         prepare_runtime(&root, "fixture", &files, &archive).unwrap();
         assert!(valid_runtime(&directory, &files));
+        // A missing completion marker falls back to a full check of the existing cache.
+        fs::remove_file(directory.join(".ready.json")).unwrap();
+        prepare_runtime(&root, "fixture", &files, &[]).unwrap();
+        assert!(fast_valid_runtime(&directory, &files));
         assert!(
             prepare_runtime(&root, "truncated", &files, &archive[..archive.len() / 2]).is_err()
         );

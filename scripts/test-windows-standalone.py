@@ -2,6 +2,7 @@
 """Smoke-test the release EXE without any sibling resources or build-time DLL PATH."""
 
 import json
+import ctypes
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,24 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+def window_visible(process_id):
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found = []
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_ssize_t)
+    user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    user32.EnumWindows.argtypes = [callback_type, ctypes.c_ssize_t]
+    @callback_type
+    def visit(window, _):
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+        if pid.value == process_id and user32.IsWindowVisible(window):
+            found.append(window)
+        return 1
+    user32.EnumWindows(visit, 0)
+    return bool(found)
 
 
 def main():
@@ -36,19 +55,24 @@ def main():
         env["PATH"] = os.pathsep.join([str(system_root / "System32"), str(system_root)])
         engine_cache = Path(env["LOCALAPPDATA"]) / "com.repairrsv.desktop" / "engine"
         env.pop("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER", None)
+        started = time.monotonic()
         app = subprocess.Popen([str(standalone)], cwd=isolated, env=env)
         try:
             deadline = time.monotonic() + 120
             helper = None
+            visible_at = None
             while time.monotonic() < deadline:
                 if app.poll() is not None:
                     raise RuntimeError(f"Standalone app exited early: {app.returncode}")
+                if visible_at is None and window_visible(app.pid):
+                    visible_at = time.monotonic()
                 candidates = [path for path in engine_cache.glob("*/untrunc-rsv.exe") if "-staging-" not in str(path)]
-                if candidates:
+                if candidates and visible_at is not None:
                     helper = candidates[0]
                     break
                 time.sleep(0.5)
             assert helper is not None, "App did not extract the embedded engine"
+            print(f"Window visible after {visible_at - started:.2f}s; engine cache ready after {time.monotonic() - started:.2f}s")
             fixture = root / "probe.mp4"
             fixture.write_bytes(b"probe fixture" * 16)
             probe = subprocess.run(
